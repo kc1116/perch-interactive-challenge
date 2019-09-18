@@ -1,0 +1,17 @@
+syntax = "proto3";
+package protos;
+
+import "google/protobuf/timestamp.proto";
+
+enum INTERACTION_TYPE {
+    PICK_UP = 0;
+    SCREEN_TOUCH = 1;
+}
+
+message Event {
+     string product_id = 1;
+     string product_name = 2;
+     google.protobuf.Timestamp timestamp = 3;
+     INTERACTION_TYPE interaction_type = 4;
+     string button_name = 5;
+}
