@@ -9,17 +9,18 @@ import (
 )
 
 var (
-	once sync.Once
-	gcClient *cloudiot.Service
-	pubSubClient *pubsub.Client
+	httpClientOnce   sync.Once
+	pubSubClientOnce sync.Once
+	gcClient         *cloudiot.Service
+	pubSubClient     *pubsub.Client
 )
 
-// GCHttpClient initializes google cloud client from credentials in env
+// GCHttpClient initializes google cloud Client from credentials in env
 func GCHttpClient() (*cloudiot.Service, error) {
 	var clientErr error
-	once.Do(func() {
+	httpClientOnce.Do(func() {
 		ctx := context.Background()
-		httpClient, err := google.DefaultClient(ctx, cloudiot.CloudPlatformScope);
+		httpClient, err := google.DefaultClient(ctx, cloudiot.CloudPlatformScope)
 		if err != nil {
 			clientErr = err
 			return
@@ -36,10 +37,10 @@ func GCHttpClient() (*cloudiot.Service, error) {
 	return gcClient, clientErr
 }
 
-// PubSubClient initializes google cloud pubsub client from credentials in env
+// PubSubClient initializes google cloud pubsub Client from credentials in env
 func PubSubClient(projectID string) (*pubsub.Client, error) {
 	var clientErr error
-	once.Do(func() {
+	pubSubClientOnce.Do(func() {
 		ctx := context.Background()
 		client, err := pubsub.NewClient(ctx, projectID)
 		if err != nil {

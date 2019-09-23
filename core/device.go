@@ -7,24 +7,33 @@ import (
 	"fmt"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/eclipse/paho.mqtt.golang"
+	"github.com/kc1116/perch-interactive-challenge/core/protos"
 	"google.golang.org/api/cloudiot/v1"
 	"io/ioutil"
-	"log"
 	"math/rand"
-	"os"
+	"path"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
-var certPool *x509.CertPool
-
 const (
 	mqttServer = "ssl://mqtt.googleapis.com:8883"
-	topicType = "events"
-	qos = 1
-	retain = false
-	username = "unused"
+	topicType  = "events"
+	qos        = 1
+	retain     = false
+	username   = "unused"
 )
+
+var mqttPool = &MqttPool{}
+
+type MqttPool struct {
+	certs *x509.CertPool
+	conn  mqtt.Client
+	sync.Once
+	sync.Mutex
+}
 
 type Device struct {
 	Region      string
@@ -38,18 +47,20 @@ type Device struct {
 	device      *cloudiot.Device
 	client      *cloudiot.Service
 	mqttconn    mqtt.Client
-	Certs TLSCerts
+	Certs       TLSCerts
 }
 
 type TLSCerts struct {
 	RootCertTmpl *x509.Certificate
-	Cert *x509.Certificate
-	Pem string
-	Key *rsa.PrivateKey
+	Cert         *x509.Certificate
+	Pem          string
+	Key          *rsa.PrivateKey
 }
 
+// Init
 func (d *Device) Init() (*Device, error) {
 	var err error
+
 	d.client, err = GCHttpClient()
 	if err != nil {
 		return nil, err
@@ -63,9 +74,7 @@ func (d *Device) Init() (*Device, error) {
 // CreateDevice creates our device in google cloud
 func (d *Device) CreateDevice() error {
 	var err error
-	if d.device = d.GetDevice(); d.device != nil {
-		return nil
-	}
+	_ = d.CleanUp()
 
 	err = d.NewKey()
 	if err != nil {
@@ -77,7 +86,6 @@ func (d *Device) CreateDevice() error {
 		return err
 	}
 
-	log.Println(d.Certs.Pem)
 	device := cloudiot.Device{
 		Id: d.DeviceID,
 		Credentials: []*cloudiot.DeviceCredential{
@@ -119,30 +127,7 @@ func (d *Device) CleanUp() error {
 	return nil
 }
 
-func (d *Device) ConnectMQTT() error {
-	config := &tls.Config{
-		RootCAs:            certPool,
-		MinVersion: tls.VersionTLS12,
-	}
-
-	opts := mqtt.NewClientOptions().
-		AddBroker(mqttServer).
-		SetTLSConfig(config).
-		SetClientID(d.DevicePath).
-		SetUsername(username).
-		SetPassword(d.tokenString).
-		SetProtocolVersion(4)
-
-	log.Println(opts.ClientID)
-	d.mqttconn = mqtt.NewClient(opts)
-	if token := d.mqttconn.Connect(); token.Wait() && token.Error() != nil {
-		log.Println("Failed to connect client ", token.Error())
-		return token.Error()
-	}
-
-	return nil
-}
-
+// NewKey
 func (d *Device) NewKey() error {
 	key, rootCertTempl, err := CreateKey()
 	rootCert, rootCertPEM, err := CreateCert(rootCertTempl, rootCertTempl, &key.PublicKey, key)
@@ -152,14 +137,15 @@ func (d *Device) NewKey() error {
 
 	d.Certs = TLSCerts{
 		RootCertTmpl: rootCertTempl,
-		Cert: rootCert,
-		Pem: fmt.Sprintf("%s", rootCertPEM),
-		Key: key,
+		Cert:         rootCert,
+		Pem:          fmt.Sprintf("%s", rootCertPEM),
+		Key:          key,
 	}
 
 	return nil
 }
 
+// JWT
 func (d *Device) JWT() error {
 	token := jwt.New(jwt.SigningMethodRS256)
 	token.Claims = jwt.StandardClaims{
@@ -177,10 +163,62 @@ func (d *Device) JWT() error {
 	return nil
 }
 
+// ConnectMQTT
+func (d *Device) ConnectMQTT() error {
+	var err error
+	mqttPool.Do(func() {
+		mqttPool.Lock()
+
+		config := &tls.Config{
+			RootCAs:    mqttPool.certs,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		opts := mqtt.NewClientOptions().
+			AddBroker(mqttServer).
+			SetTLSConfig(config).
+			SetClientID(d.DevicePath).
+			SetUsername(username).
+			SetPassword(d.tokenString).
+			SetProtocolVersion(4)
+
+		mqttPool.conn = mqtt.NewClient(opts)
+		if token := mqttPool.conn.Connect(); token.Wait() && token.Error() != nil {
+			err = token.Error()
+		}
+
+		mqttPool.Unlock()
+	})
+
+	return err
+}
+
+// Publish
+func (d *Device) Publish(evt *protos.Event) error {
+	encoded, err := EncodeEvent(evt)
+	if err != nil {
+		return fmt.Errorf("error encoding evt during publish %s", err)
+	}
+	topic := fmt.Sprintf(interactionsTopicFMT, d.device.Id)
+
+	mqttPool.Lock()
+	if token := mqttPool.conn.Publish(topic, qos, retain, encoded); token.Wait() && token.Error() != nil {
+		return token.Error()
+	}
+	mqttPool.Unlock()
+
+	return nil
+}
+
+// StartSession
+func (d *Device) StartSession(wg *sync.WaitGroup) {
+	NewSession(d.DeviceID, d.Publish).Start(wg)
+}
+
 // String
 func (d *Device) String() string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("DeviceID: %s \n", d.device.Id))
+	builder.WriteString(fmt.Sprintf("ID: %s \n", d.device.Id))
 	builder.WriteString(fmt.Sprintf("DeviceName: %s \n", d.device.Name))
 	builder.WriteString(fmt.Sprintf("Region: %s \n", d.Region))
 	builder.WriteString(fmt.Sprintf("RegistryID: %s \n", d.RegistryID))
@@ -189,36 +227,34 @@ func (d *Device) String() string {
 	return builder.String()
 }
 
-func DeviceID() string {
+// ID
+func ID() string {
 	return fmt.Sprintf("perchdevice-%04X%04X", rand.Intn(0x10000), rand.Intn(0x10000))
 }
 
 // NewDevice returns unintialized device struct
-func NewDevice( projectID, region, registryID, registryPath string) *Device {
-	deviceID :=  DeviceID()
+func NewDevice(projectID, region, registryID, registryPath string) *Device {
+	deviceID := ID()
 	return &Device{
-		Region: region,
-		projectID: projectID,
+		Region:     region,
+		projectID:  projectID,
 		RegistryID: registryID,
-		DeviceID:  deviceID,
-		parent: registryPath,
+		DeviceID:   deviceID,
+		parent:     registryPath,
 		DevicePath: fmt.Sprintf("%s/devices/%s", registryPath, deviceID),
 		eventTopic: fmt.Sprintf("/devices/%s/events", deviceID),
 	}
 }
 
-func init()  {
-	log.Println("creating cert pool for MQTT connections")
-	certPool = x509.NewCertPool()
-	pemCerts, err := ioutil.ReadFile("/Users/kc1116/Desktop/perch-interactive-challenge/core/google-cert/roots.pem")
+func init() {
+	mqttPool.certs = x509.NewCertPool()
+	_, name, _, _ := runtime.Caller(0)
+	p := path.Join(path.Dir(name), "./google-cert/roots.pem")
+
+	pemCerts, err := ioutil.ReadFile(p)
 	if err != nil {
-		log.Fatal("can not load google certs ", err)
+		logger.Fatalf("can not load google certs %s", err)
 	}
 
-	certPool.AppendCertsFromPEM(pemCerts)
-
-	mqtt.DEBUG = log.New(os.Stderr, "DEBUG - ", log.LstdFlags)
-	mqtt.CRITICAL = log.New(os.Stderr, "CRITICAL - ", log.LstdFlags)
-	mqtt.WARN = log.New(os.Stderr, "WARN - ", log.LstdFlags)
-	mqtt.ERROR = log.New(os.Stderr, "ERROR - ", log.LstdFlags)
+	mqttPool.certs.AppendCertsFromPEM(pemCerts)
 }

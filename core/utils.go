@@ -5,17 +5,28 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/gogo/protobuf/proto"
+	"github.com/kc1116/perch-interactive-challenge/core/protos"
+	"github.com/sirupsen/logrus"
 	"math/big"
 	"time"
 )
 
+var logger = logrus.New()
+
 const (
-	mqttClientIDFMT = "projects/%s/locations/%s/registries/%s/devices/%s"
-	parentFMT = "projects/%s/locations/%s"
+	mqttClientIDFMT      = "projects/%s/locations/%s/registries/%s/devices/%s"
+	interactionsTopicFMT = "/devices/%s/events/interactions"
+	parentFMT            = "projects/%s/locations/%s"
 )
+
+func Logger() *logrus.Logger {
+	return logger
+}
 
 // MQTTClientID
 func MQTTClientID(projectID, region, registryID, deviceID string) string {
@@ -26,6 +37,9 @@ func MQTTClientID(projectID, region, registryID, deviceID string) string {
 func DeviceRegistryParent(projectID, region string) string {
 	return fmt.Sprintf(parentFMT, projectID, region)
 }
+
+// https://ericchiang.github.io/post/go-tls/ this blog post was the only post that properly explained TLS Certs etc
+// before that google iot-core docs are super vague about what you need to actually do
 
 // helper function to create a cert template with a serial number and other required fields
 func CertTemplate() (*x509.Certificate, error) {
@@ -41,7 +55,7 @@ func CertTemplate() (*x509.Certificate, error) {
 		Subject:               pkix.Name{CommonName: "unused"},
 		SignatureAlgorithm:    x509.SHA256WithRSA,
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(24*time.Hour), // valid for an hour
+		NotAfter:              time.Now().Add(24 * time.Hour), // valid for an hour
 		BasicConstraintsValid: true,
 	}
 	return &tmpl, nil
@@ -84,4 +98,23 @@ func CreateKey() (*rsa.PrivateKey, *x509.Certificate, error) {
 	rootCertTmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}
 
 	return rootKey, rootCertTmpl, nil
+}
+
+// EncodeEvent base64 encode event proto bytes
+func EncodeEvent(evt *protos.Event) (string, error) {
+	b, err := proto.Marshal(evt)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(b), nil
+}
+
+// DecodeEvt decode incoming event
+func DecodeEvt(encodedEvtStr string) *protos.Event {
+	evt := &protos.Event{}
+	b, _ := hex.DecodeString(encodedEvtStr)
+
+	_ = proto.Unmarshal(b, evt)
+	return evt
 }

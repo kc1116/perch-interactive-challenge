@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"google.golang.org/api/cloudiot/v1"
 	"strings"
-	"sync"
 )
 
 type DeviceRegistry struct {
@@ -14,16 +13,15 @@ type DeviceRegistry struct {
 	RegistryID   string
 	TopicID      string
 	projectID    string
-	parent string
-	once sync.Once
-	registry     *cloudiot.DeviceRegistry
-	topic *pubsub.Topic
-	client       *cloudiot.Service
-	pubSubClient *pubsub.Client
+	parent       string
+	Registry     *cloudiot.DeviceRegistry
+	Topic        *pubsub.Topic
+	Client       *cloudiot.Service
+	PubSubClient *pubsub.Client
 }
 
-// Init initializes our DeviceRegistry by creating the device registry and pub/sub topic in google cloud
-func (d *DeviceRegistry) Init() (*DeviceRegistry, error) {
+// Init initializes our DeviceRegistry by creating the device Registry and pub/sub Topic in google cloud
+func (d *DeviceRegistry) Init(create bool) (*DeviceRegistry, error) {
 	gcclient, err := GCHttpClient()
 	if err != nil {
 		return nil, err
@@ -34,29 +32,33 @@ func (d *DeviceRegistry) Init() (*DeviceRegistry, error) {
 		return nil, err
 	}
 
-	d.client = gcclient
-	d.pubSubClient = pubsubClient
-
-	if registry := d.GetRegistry(); registry != nil {
-		d.registry = registry
-		return d, nil
-	}
+	d.Client = gcclient
+	d.PubSubClient = pubsubClient
 
 	err = d.CreateTopic()
 	if err != nil {
 		return d, err
 	}
 
-	registry, err := d.CreateRegistry(d.topic.String())
+	if registry := d.GetRegistry(); registry != nil {
+		d.Registry = registry
+		return d, nil
+	}
+
+	if !create {
+		return nil, fmt.Errorf("Registry not found %s, if you want to create the Registry pass true for create", d.RegistryName())
+	}
+
+	registry, err := d.CreateRegistry(d.Topic.String())
 	if err != nil {
 		return d, err
 	}
 
-	d.registry = registry
+	d.Registry = registry
 	return d, nil
 }
 
-// CreateRegistry creates a device registry if it does not already exists
+// CreateRegistry creates a device Registry if it does not already exists
 func (d *DeviceRegistry) CreateRegistry(fullTopicPath string) (*cloudiot.DeviceRegistry, error) {
 	registry := &cloudiot.DeviceRegistry{
 		Id: d.RegistryID,
@@ -67,45 +69,46 @@ func (d *DeviceRegistry) CreateRegistry(fullTopicPath string) (*cloudiot.DeviceR
 		},
 	}
 
-	_, err := d.client.Projects.Locations.Registries.Create(d.parent, registry).Do()
+	_, err := d.Client.Projects.Locations.Registries.Create(d.parent, registry).Do()
 	if err != nil {
 		return registry, err
 	}
 
-	d.registry = registry
+	d.Registry = registry
 
 	return registry, err
 }
 
+// GetRegistry gets Registry details from GCP
 func (d *DeviceRegistry) GetRegistry() *cloudiot.DeviceRegistry {
-	if registry, err := d.client.Projects.Locations.Registries.Get(d.RegistryName()).Do(); err == nil {
+	if registry, err := d.Client.Projects.Locations.Registries.Get(d.RegistryName()).Do(); err == nil {
 		return registry
 	}
 
 	return nil
 }
 
-// CreateTopic creates a topic if it does not already exists
+// CreateTopic creates a Topic if it does not already exists
 func (d *DeviceRegistry) CreateTopic() error {
-	topic := d.pubSubClient.TopicInProject(d.TopicID, d.projectID)
-	if topic != nil {
-		d.topic = topic
+	topic := d.PubSubClient.Topic(d.TopicID)
+	if ok, _ := topic.Exists(context.Background()); ok {
+		d.Topic = topic
 		return nil
 	}
 
-	var err error
-	topic, err = d.pubSubClient.CreateTopic(context.Background(), d.TopicID)
+	topic, err := d.PubSubClient.CreateTopic(context.Background(), d.TopicID)
 	if err != nil {
-		return nil
+		return err
 	}
 
-	d.topic = topic
+	d.Topic = topic
 	return nil
 }
 
+// CleanUp destroys Registry resource in GCP
 func (d *DeviceRegistry) CleanUp() error {
 	if registry := d.GetRegistry(); registry != nil {
-		_, err := d.client.Projects.Locations.Registries.Delete(d.RegistryName()).Do()
+		_, err := d.Client.Projects.Locations.Registries.Delete(d.RegistryName()).Do()
 		if err != nil {
 			return err
 		}
@@ -113,15 +116,17 @@ func (d *DeviceRegistry) CleanUp() error {
 	return nil
 }
 
+// RegistryName
 func (d *DeviceRegistry) RegistryName() string {
 	return fmt.Sprintf("projects/%s/locations/%s/registries/%s", d.projectID, d.Region, d.RegistryID)
 }
 
+// String
 func (d *DeviceRegistry) String() string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("Region: %s \n", d.Region))
 	builder.WriteString(fmt.Sprintf("RegistryID: %s \n", d.RegistryID))
-	builder.WriteString(fmt.Sprintf("RegistryName: %s \n", d.registry.Name))
+	builder.WriteString(fmt.Sprintf("RegistryName: %s \n", d.Registry.Name))
 	builder.WriteString(fmt.Sprintf("TopicID: %s \n", d.TopicID))
 	builder.WriteString(fmt.Sprintf("ProjectID: %s \n", d.projectID))
 
@@ -135,6 +140,6 @@ func NewDeviceRegistry(projectID, region, registryID, topicID string) *DeviceReg
 		RegistryID: registryID,
 		Region:     region,
 		TopicID:    topicID,
-		parent: DeviceRegistryParent(projectID, region),
+		parent:     DeviceRegistryParent(projectID, region),
 	}
 }

@@ -1,20 +1,17 @@
 package core
 
 import (
-	"encoding/base64"
 	"fmt"
 	data "github.com/Pallinder/go-randomdata"
-	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/kc1116/perch-interactive-challenge/core/protos"
 	"github.com/satori/go.uuid"
 	"math/rand"
+	"sync"
 	"time"
 )
-//i. Interactions are typically clustered together every 5-30 seconds
-// the overall session lasting 5-180 seconds.
 
-//rand.Intn(max - min) + min
+var shoes = []string{"Ankle", "Athletic", "Boat Shoes", "Boot", "Clogs and Mules", "Crib Shoes", "Firstwalker", "Flat", "Flats", "Heel", "Heels", "Knee High", "Loafers", "Mid-Calf", "Over the Knee", "Oxfords", "Prewalker", "Prewalker Boots", "Slipper Flats", "Slipper Heels", "Sneakers and Athletic Shoes", "SubCategory"}
 
 const (
 	minEvtIter = 5
@@ -23,73 +20,90 @@ const (
 	maxSession = 180
 )
 
+type publish func(evt *protos.Event) error
+
 type Session struct {
-	ID string
-	EventTick 	<-chan time.Time
-	SessionTimeout <-chan time.Time
-	Done bool
+	DeviceID         string
+	ID               string
+	EventTick        <-chan time.Time
+	SessionTimeout   <-chan time.Time
+	Done             bool
+	PubFn            publish
+	Duration         string
+	InteractionSleep string
 }
 
-func NewSession() *Session {
+func NewSession(deviceID string, pubFn publish) *Session {
 	rand.Seed(time.Now().UnixNano())
-	tick := time.Second * time.Duration(rand.Intn(maxEvtIter - minEvtIter) + minEvtIter)
-	timeout := time.Second * time.Duration(rand.Intn(maxSession - minSession) + minSession)
+	tick := time.Second * time.Duration(rand.Intn(maxEvtIter-minEvtIter)+minEvtIter)
+	timeout := time.Second * time.Duration(rand.Intn(maxSession-minSession)+minSession)
 
 	return &Session{
-		ID: fmt.Sprintf("%-%", data.FirstName(rand.Intn(1-0) + 0), uuid.NewV1()),
-		EventTick: time.Tick(tick),
-		SessionTimeout: time.After(timeout),
+		DeviceID:         deviceID,
+		ID:               fmt.Sprintf("%-%", data.FirstName(rand.Intn(1-0)+0), uuid.NewV1()),
+		EventTick:        time.Tick(tick),
+		SessionTimeout:   time.After(timeout),
+		Duration:         timeout.String(),
+		InteractionSleep: tick.String(),
+		PubFn:            pubFn,
 	}
 }
 
-func (s *Session) Start()  {
+func (s *Session) Start(wg *sync.WaitGroup) {
+	logger.
+		WithField("device-id", s.DeviceID).
+		WithField("duration", s.Duration).
+		WithField("interaction-frequency", fmt.Sprintf("%s", s.InteractionSleep)).
+		Infoln("starting session")
 	for {
 		select {
 		case <-s.SessionTimeout:
 			return
 		case <-s.EventTick:
-			s.SendEvent()
+			err := s.SendEvent()
+			if err != nil {
+				logger.WithError(err).
+					WithField("device-id", s.DeviceID).
+					Warnln("error sending event during session")
+			}
 		}
 	}
 }
 
-func (s *Session) SendEvent()  {
+func (s *Session) SendEvent() error {
+	evt := RandomEvent()
+	logger.
+		WithField("product-id", evt.ProductId).
+		WithField("product-name", evt.ProductName).
+		WithField("button-name", evt.ButtonName).
+		WithField("interaction-type", evt.InteractionType.String()).
+		Infof("publishing event (device-id: %s)\n", s.DeviceID)
 
+	return s.PubFn(RandomEvent())
+}
+
+func RandomInteraction() protos.INTERACTION_TYPE {
+	rand.Seed(time.Now().Unix())
+	n := rand.Intn(2)
+	return protos.INTERACTION_TYPE(n)
+}
+
+func RandomShoe() string {
+	rand.Seed(time.Now().Unix())
+	n := rand.Intn(len(shoes) - 1)
+	return shoes[n]
 }
 
 // RandomEvent creates a random event filled with random data
 func RandomEvent() *protos.Event {
 	evt := &protos.Event{}
-	evt.ProductId = uuid.NewV4().String()
-	evt.ProductName = data.SillyName()
+	evt.ProductName = RandomShoe()
+	evt.InteractionType = RandomInteraction()
+	evt.ProductId = uuid.NewV1().String()
 	evt.Timestamp = ptypes.TimestampNow()
-
-	rand.Seed(time.Now().Unix())
-	n := rand.Intn(0 - 2) + 0
-	evt.InteractionType = protos.INTERACTION_TYPE(n)
-
 	if evt.InteractionType == protos.INTERACTION_TYPE_SCREEN_TOUCH {
 		evt.ButtonName = fmt.Sprintf("button-%s", data.SillyName())
 	}
 
-	return evt
-}
-
-// EncodeEvent base64 encode event proto bytes
-func EncodeEvent(evt *protos.Event) (string, error) {
-	b, err := proto.Marshal(evt)
-	if err != nil {
-		return "", err
-	}
-
-	return base64.RawStdEncoding.EncodeToString(b), nil
-}
-
-// DecodeEvt decode incoming event
-func DecodeEvt(encodedEvtStr string) *protos.Event {
-	evt := &protos.Event{}
-	b, _ := base64.RawStdEncoding.DecodeString(encodedEvtStr)
-
-	_ = proto.Unmarshal(b, evt)
 	return evt
 }
