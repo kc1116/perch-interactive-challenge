@@ -1,6 +1,6 @@
 import * as React from "react"
-import { Container, Header, Segment } from 'semantic-ui-react'
-
+import { Header, List, Segment, Visibility} from 'semantic-ui-react'
+import Infinite from 'react-infinite';
 const style = {
     h1: {
         marginTop: '3em',
@@ -17,62 +17,101 @@ const style = {
     },
 }
 
-const events = [
-    {
-        date: '1 Hour Ago',
-        image: '/images/avatar/small/elliot.jpg',
-        meta: '4 Likes',
-        summary: 'Elliot Fu added you as a friend',
-    },
-    {
-        date: '4 days ago',
-        image: '/images/avatar/small/helen.jpg',
-        meta: '1 Like',
-        summary: 'Helen Troy added 2 new illustrations',
-        extraImages: [
-            '/images/wireframe/image.png',
-            '/images/wireframe/image-text.png',
-        ],
-    },
-    {
-        date: '3 days ago',
-        image: '/images/avatar/small/joe.jpg',
-        meta: '8 Likes',
-        summary: 'Joe Henderson posted on his page',
-        extraText:
-            "Ours is a life of constant reruns. We're always circling back to where we'd we started.",
-    },
-    {
-        date: '4 days ago',
-        image: '/images/avatar/small/justen.jpg',
-        meta: '41 Likes',
-        summary: 'Justen Kitsune added 2 new photos of you',
-        extraText:
-            'Look at these fun pics I found from a few years ago. Good times.',
-        extraImages: [
-            '/images/wireframe/image.png',
-            '/images/wireframe/image-text.png',
-        ],
-    },
-];
+class Interaction extends React.Component {
+    render() {
+        return (
+            <List.Item key={Math.random().toString()}>
+                <List.Content>
+                    <List.Header>
+                        <span>{this.props.productName}</span>
+                        <span>Published at {this.props.timestamp}</span>
+                    </List.Header>
+                    <List.Description>
+                        <span>Interaction Type: {this.props.interactionType}</span>
+                        <span>ID: {this.props.id}</span>
+                    </List.Description>
+                </List.Content>
+            </List.Item>
+        );
+    }
+}
 
 export class EventFeed extends React.Component {
     constructor(props){
-        super(props)
+        super(props);
+        this.state = {
+            ws: new WebSocket('ws://localhost:8000/ws'),
+            connected: false,
+            isInfiniteLoading: false,
+            interactions: []
+        };
+    }
+
+    // handleInfiniteLoad() {
+    //     this.setState({
+    //         isInfiniteLoading: true
+    //     });
+    //     setTimeout(function() {
+    //         var elemLength = that.state.elements.length,
+    //             newElements = that.buildElements(elemLength, elemLength + 1000);
+    //         that.setState({
+    //             isInfiniteLoading: false,
+    //             elements: that.state.elements.concat(newElements)
+    //         });
+    //     }, 2500);
+    // }
+
+    // elementInfiniteLoad() {
+    //     return <div className="infinite-list-item">
+    //         Loading...
+    //     </div>;
+    // }
+
+    componentDidMount() {
+        this.state.ws.onopen = () => {
+            // on connecting, do nothing but log it to the console
+            const connected = true;
+            this.setState({connected})
+        };
+
+        this.state.ws.onmessage = evt => {
+            // listen to data sent from the websocket server
+            const message = JSON.parse(evt.data);
+            let interactions = this.state.interactions;
+            interactions.push(<Interaction
+                id={message.identifier}
+                productName={message.productName}
+                interactionType={message.interactionType}
+                timestamp={message.timestamp} />);
+            this.setState({interactions});
+            console.log(message);
+        };
+
+        this.state.ws.onclose = () => {
+            const connected = false;
+            this.setState({connected})
+            // automatically try to reconnect on connection loss
+        }
     }
 
     render() {
         return (
             <div>
-            <Header as='h3' textAlign='center' style={style.h3} content='Container' />
-                <Container>
-                    <Segment.Group>
-                    <Segment>Content</Segment>
-                    <Segment>Content</Segment>
-                    <Segment>Content</Segment>
-                    <Segment>Content</Segment>
-                    </Segment.Group>
-                </Container>
+            <Header as='h2' textAlign='center' style={style.h2} content='Perch Device Interactions' />
+            <Header as='h3' textAlign='center' style={style.h3}>
+                <span>Websocket status:</span>
+                <span style={{'padding': '10px', 'color': this.state.connected ? 'green' : 'red'}}>{this.state.connected ? 'connected' : 'disconnected'}</span>
+            </Header>
+                <Segment inverted style={{'height': '100vh'}}>
+                    <Visibility
+                        as={List}
+                        continuous={false}
+                        once={false}
+                        divided inverted relaxed
+                    >
+                            {this.state.interactions}
+                    </Visibility>
+                </Segment>
             </div>
         )
     }

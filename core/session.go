@@ -99,7 +99,7 @@ func RandomEvent() *protos.Event {
 	evt := &protos.Event{}
 	evt.ProductName = RandomShoe()
 	evt.InteractionType = RandomInteraction()
-	evt.ProductId = uuid.NewV1().String()
+	evt.ProductId = uuid.NewV4().String()
 	evt.Timestamp = ptypes.TimestampNow()
 	if evt.InteractionType == protos.INTERACTION_TYPE_SCREEN_TOUCH {
 		evt.ButtonName = fmt.Sprintf("button-%s", data.SillyName())

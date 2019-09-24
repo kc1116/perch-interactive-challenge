@@ -13,6 +13,7 @@ import (
 var (
 	sessions, iterations int
 )
+
 var sessionCmd = &cobra.Command{
 	Use:   "simulator",
 	Short: "Start a simulation that attempts to mimick a real perch session with a device",

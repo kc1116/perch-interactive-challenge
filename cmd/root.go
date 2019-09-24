@@ -34,5 +34,5 @@ func init() {
 	_ = viper.BindPFlag("topicID", rootCmd.PersistentFlags().Lookup("topicID"))
 	_ = viper.BindPFlag("region", rootCmd.PersistentFlags().Lookup("region"))
 
-	rootCmd.AddCommand(aggregateCmd, sessionCmd)
+	rootCmd.AddCommand(aggregateCmd, sessionCmd, websocketCmd)
 }
