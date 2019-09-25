@@ -1,0 +1,74 @@
+version: '3.6'
+
+x-environment-variables: &common
+  GOOGLE_APPLICATION_CREDENTIALS: /root/keys/keyfile.json
+
+services:
+  simulator:
+    image: perch-iot-pubsub
+    container_name: perch-iot-device-simulator
+    command: /bin/ash -c "perch-iot-pubsub simulator"
+    ports:
+      - '8883:8883'
+    environment:
+      *common
+    env_file:
+      - ../.env
+    volumes:
+      - ${GCP_KEY_PATH}:/root/keys/keyfile.json:ro
+    build:
+      dockerfile: ./Dockerfile
+      context: ..
+
+  aggregator:
+    image: perch-iot-pubsub
+    container_name: perch-iot-event-aggregator
+    depends_on:
+      - rethinkdb
+    command: /bin/ash  -c "perch-iot-pubsub aggregate -H rethinkdb"
+    environment:
+      *common
+    env_file:
+      - ../.env
+    volumes:
+      - ${GCP_KEY_PATH}:/root/keys/keyfile.json:ro
+    build:
+      dockerfile: ./Dockerfile
+      context: ..
+
+  rethinkdb:
+    image: rethinkdb
+    expose:
+      - 8080
+      - 29015
+      - 28015
+    ports:
+      - "8080:8080"
+      - "29015:29015"
+      - "28015:28015"
+
+  websocket_server:
+    image: perch-iot-pubsub
+    container_name: perch-iot-websocket_server
+    command: /bin/ash  -c "perch-iot-pubsub websocket -H rethinkdb"
+    depends_on:
+      - rethinkdb
+    ports:
+      - '8000:8000'
+    build:
+      dockerfile: ./Dockerfile
+      context: ..
+
+  event_stream_ui:
+    image: perch-iot-pubsub
+    container_name: perch-iot-event_stream_ui
+    depends_on:
+      - websocket_server
+    command: /bin/ash  -c "serve -s /ui"
+    expose:
+      - 5000
+    ports:
+      - '5000:5000'
+    build:
+      dockerfile: ./Dockerfile
+      context: ..

@@ -1,6 +1,6 @@
-OUT := perch-interactive-challenge-microservice
-PKG := ./cmd
-DOCKERFILE := ./build/package/Dockerfile
+OUT := perch-iot-pubsub
+PKG := .
+DOCKERFILE := ./build/Dockerfile
 VERSION := $(shell git describe --always --long --dirty)
 PKG_LIST := $(shell go list ${PKG}/... | grep -v /vendor/)
 GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/)
@@ -10,14 +10,17 @@ all: run
 docker-build:
 	docker build -f ${DOCKERFILE} -t ${OUT} .
 
+run_network:
+	docker-compose -f ./build/docker-compose.yaml up --abort-on-container-exit
+
 deps:
-	GO111MODULES=on go get -v ${PKG}
+	GO111MODULES=on go get ${PKG}
 
 build:
-	GO111MODULES=on go build -v -o ${OUT} ${PKG}
+	GO111MODULES=on go build -o ${OUT} ${PKG}
 
-test:
-	GO111MODULES=on go test -short ${PKG_LIST}
+deploy: deps build
+	mv ./perch-iot-pubsub /usr/bin/perch-iot-pubsub
 
 vet:
 	GO111MODULES=on go vet ${PKG_LIST}
@@ -33,4 +36,4 @@ out:
 protos:
 	protoc -I ./protos ./protos/event.proto --go_out=./core/protos
 
-.PHONY: run protos build docker-build vet lint out deps
+.PHONY: run protos build docker-build vet lint out deps deploy run_network

@@ -17,6 +17,12 @@ var (
 var sessionCmd = &cobra.Command{
 	Use:   "simulator",
 	Short: "Start a simulation that attempts to mimick a real perch session with a device",
+	Long: `The simulator attempts to do random actions during sessions just like a real person. A session
+		can be considered a person coming into contact with our IOT device. Every action this person takes is considered 
+		an event and published through GCP IOT Core MQTT Bridge. Each session will not last as long as others this duration 
+		is randomized between 5s & 180. A Simulated device acts like it's own independent entity. Thus sessions are independent
+		from each other. The frequency in which events occur in a simulated session is a randomized number between 5s and 30s. 
+		You can increase the amount of concurrent sessions (default: 2).`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if sessions < 1 {
 			return fmt.Errorf("invalid value for sessions %s", sessions)

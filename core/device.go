@@ -11,8 +11,6 @@ import (
 	"google.golang.org/api/cloudiot/v1"
 	"io/ioutil"
 	"math/rand"
-	"path"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -248,10 +246,7 @@ func NewDevice(projectID, region, registryID, registryPath string) *Device {
 
 func init() {
 	mqttPool.certs = x509.NewCertPool()
-	_, name, _, _ := runtime.Caller(0)
-	p := path.Join(path.Dir(name), "./google-cert/roots.pem")
-
-	pemCerts, err := ioutil.ReadFile(p)
+	pemCerts, err := ioutil.ReadFile("/tmp/google-cert/roots.pem")
 	if err != nil {
 		logger.Fatalf("can not load google certs %s", err)
 	}

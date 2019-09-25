@@ -15,6 +15,10 @@ var (
 var aggregateCmd = &cobra.Command{
 	Use:   "aggregate",
 	Short: "Will run GCP pubsub event aggregator",
+	Long: `The event aggregator is the consumer of events that are published from our IOT devices. 
+		A subscription is created and and the specified number of worker threaders are started in background 
+		that will continuously process events put on their shared event queue. Events are slightly massaged from protobuf
+		serialized objects to plain json objects and then stored in rethinkdb.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if threads < 1 {
 			return fmt.Errorf("invalid value for threads %s", threads)
